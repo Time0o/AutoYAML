@@ -31,26 +31,30 @@ public:
 
   void run(clang::ast_matchers::MatchFinder::MatchResult const &Result) override
   {
-    auto &SourceManager { Context_.getSourceManager() };
-    auto &LangOpts { Context_.getLangOpts() };
-
     auto Record { Result.Nodes.getNodeAs<clang::RecordDecl>("AutoYAML") };
 
     auto Attr { Record->getAttrs()[0] };
-    auto AttrRange { clang::CharSourceRange::getTokenRange(Attr->getRange()) };
-    auto AttrText { clang::Lexer::getSourceText(AttrRange, SourceManager, LangOpts) };
 
-    if (AttrText != R"(annotate("AutoYAML"))")
+    if (printSource(Attr->getRange()) != R"(annotate("AutoYAML"))")
       return;
 
     llvm::outs() << Record->getName() << '\n';
   }
 
 private:
+  llvm::StringRef printSource(clang::SourceRange const &Range) const
+  {
+    auto const &SourceManager { Context_.getSourceManager() };
+    auto const &LangOpts { Context_.getLangOpts() };
+
+    auto CharRange { clang::CharSourceRange::getTokenRange(Range) };
+
+    return clang::Lexer::getSourceText(CharRange, SourceManager, LangOpts);
+  }
+
   clang::ASTContext &Context_;
 };
 
-// XXX Replace #pragma with __attribute__
 struct AutoYAMLASTConsumer : public clang::ASTConsumer
 {
   void HandleTranslationUnit(clang::ASTContext &Context) override
