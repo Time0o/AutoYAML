@@ -10,7 +10,7 @@ endif()
 
 find_package(LLVM REQUIRED CONFIG)
 
-add_executable(autoyaml AutoYaml.cpp)
+add_executable(autoyaml AutoYAML.cpp)
 
 target_compile_definitions(autoyaml PRIVATE ${LLVM_DEFINITIONS})
 target_include_directories(autoyaml PRIVATE ${LLVM_INCLUDE_DIRS})
