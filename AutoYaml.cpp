@@ -120,7 +120,7 @@ public:
   void run(clang::ast_matchers::MatchFinder::MatchResult const &Result) override
   {
     // Get record declaration node.
-    auto Record { Result.Nodes.getNodeAs<clang::CXXRecordDecl>("AutoYAML") };
+    auto Record { Result.Nodes.getNodeAs<clang::RecordDecl>("AutoYAML") };
     assert(Record);
     assert(Record->hasAttrs());
 
@@ -137,7 +137,7 @@ public:
   }
 
 private:
-  void emitConvert(const clang::CXXRecordDecl *Record)
+  void emitConvert(const clang::RecordDecl *Record)
   {
     auto RecordName { Record->getName() };
 
@@ -154,7 +154,7 @@ private:
     OS_ << "};" << OS_.EndB;
   }
 
-  void emitEncode(const clang::CXXRecordDecl *Record)
+  void emitEncode(const clang::RecordDecl *Record)
   {
     auto RecordName { Record->getName() };
 
@@ -179,7 +179,7 @@ private:
     OS_ << "}" << OS_.EndB;
   }
 
-  void emitDecode(const clang::CXXRecordDecl *Record)
+  void emitDecode(const clang::RecordDecl *Record)
   {
     // XXX
   }
