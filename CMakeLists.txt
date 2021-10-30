@@ -15,5 +15,6 @@ add_executable(autoyaml AutoYaml.cpp)
 target_compile_definitions(autoyaml PRIVATE ${LLVM_DEFINITIONS})
 target_include_directories(autoyaml PRIVATE ${LLVM_INCLUDE_DIRS})
 target_link_libraries(autoyaml PRIVATE clang-cpp)
+target_compile_features(autoyaml PRIVATE cxx_std_17)
 
 llvm_config(autoyaml USE_SHARED option)
