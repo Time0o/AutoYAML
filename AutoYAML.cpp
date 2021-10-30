@@ -1,3 +1,4 @@
+#include <cstdlib>
 #include <memory>
 #include <string>
 
@@ -16,6 +17,7 @@
 #include "clang/Tooling/CommonOptionsParser.h"
 #include "clang/Tooling/Tooling.h"
 
+#include "llvm/ADT/SmallString.h"
 #include "llvm/ADT/StringRef.h"
 #include "llvm/Support/Casting.h"
 #include "llvm/Support/CommandLine.h"
@@ -25,6 +27,10 @@
 static llvm::cl::OptionCategory AutoYAMLToolCategory { "autoyaml options" };
 
 static llvm::cl::extrahelp CommonHelp { clang::tooling::CommonOptionsParser::HelpMessage };
+
+static llvm::cl::opt<std::string> OutDir { "out-dir",
+                                           llvm::cl::desc("Output directory"),
+                                           llvm::cl::cat(AutoYAMLToolCategory) };
 
 // Convenience wrapper around llvm::raw_fd_ostream that handles indentation levels nicely.
 class AutoYAMLOS
@@ -41,7 +47,7 @@ public:
   static inline EndLine const EndL; // End of line.
   static inline EndBlock const EndB; // End of block.
 
-  AutoYAMLOS(const std::string &File)
+  AutoYAMLOS(llvm::StringRef File)
   {
     std::error_code EC;
     OS_ = std::make_unique<llvm::raw_fd_ostream>(File, EC);
@@ -242,9 +248,11 @@ struct AutoYAMLFrontendAction : public clang::ASTFrontendAction
                                                         llvm::StringRef File) override
   {
     // Create output file stream.
-    std::string InFileStem { llvm::sys::path::stem(File).str() };
+    enum { OUTFILE_PATH_MAX = 4096 };
 
-    std::string OutFile { InFileStem + ".AutoYAML.h" };
+    llvm::SmallString<OUTFILE_PATH_MAX> OutFile;
+    llvm::sys::path::append(OutFile, OutDir, llvm::sys::path::filename(File));
+    llvm::sys::path::replace_extension(OutFile, ".AutoYAML.h");
 
     OS_ = std::make_unique<AutoYAMLOS>(OutFile);
 
@@ -263,11 +271,21 @@ private:
 
 int main(int argc, char const **argv)
 {
-  clang::tooling::CommonOptionsParser Parser { argc, argv, AutoYAMLToolCategory };
+  // Parse command line arguments.
+  auto Parser { clang::tooling::CommonOptionsParser::create(
+                  argc, argv, AutoYAMLToolCategory, llvm::cl::OneOrMore) };
 
-  clang::tooling::ClangTool Tool { Parser.getCompilations(), Parser.getSourcePathList() };
+  if (!Parser) {
+    llvm::errs() << Parser.takeError();
+    return EXIT_FAILURE;
+  }
 
+  // Create frontend action.
   auto FrontendAction { clang::tooling::newFrontendActionFactory<AutoYAMLFrontendAction>() };
 
-  return Tool.run(FrontendAction.get());
+  // Create and run tool.
+  clang::tooling::ClangTool Tool { Parser->getCompilations(), Parser->getSourcePathList() };
+
+  if (Tool.run(FrontendAction.get()))
+    return EXIT_FAILURE;
 }
