@@ -314,7 +314,7 @@ int main(int argc, char const **argv)
 
   auto CppHeaderArgumentAdjuster {
     clang::tooling::getInsertArgumentAdjuster(
-      {"-xc++-header"},
+      "-xc++-header",
       clang::tooling::ArgumentInsertPosition::BEGIN) };
 
   Tool.appendArgumentsAdjuster(CppHeaderArgumentAdjuster);
