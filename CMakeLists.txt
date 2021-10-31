@@ -8,7 +8,7 @@ include(CTest)
 
 # project structure
 set(AutoYAML_src AutoYAML.cpp)
-set(AutoYAML_bin autoyaml)
+set(AutoYAML_bin AutoYAML)
 set(AutoYAML_example_in AutoYAML_example.h)
 set(AutoYAML_example_out AutoYAML_example.AutoYAML.h)
 set(AutoYAML_example_out_dir "${CMAKE_CURRENT_BINARY_DIR}")
@@ -19,22 +19,10 @@ option(AUTO_YAML_INSTALL "Generate AutoYAML install target" ON)
 option(AUTO_YAML_BUILD_EXAMPLE "Build AutoYAML example" ON)
 option(AUTO_YAML_BUILD_TEST "Build AutoYAML test" ON)
 
-# dependencies
-
-# Catch2
-add_subdirectory(Catch2)
-
-list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Catch2/contrib)
-
-include(Catch)
-
 # Clang
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/ClangSetup)
 
 include(ClangSetup)
-
-# yaml-cpp
-add_subdirectory(yaml-cpp EXCLUDE_FROM_ALL)
 
 # build
 add_executable(${AutoYAML_bin} "${AutoYAML_src}")
@@ -61,6 +49,16 @@ endif()
 
 # test
 if (AUTO_YAML_BUILD_TEST AND BUILD_TESTING)
+  # yaml-cpp
+  add_subdirectory(yaml-cpp EXCLUDE_FROM_ALL)
+
+  # Catch2
+  add_subdirectory(Catch2)
+
+  list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Catch2/contrib)
+
+  include(Catch)
+
   if (NOT AUTO_YAML_BUILD_EXAMPLE)
     message(FATAL_ERROR "AUTO_YAML_BUILD_EXAMPLE must be enabled in order to build test")
   endif()
