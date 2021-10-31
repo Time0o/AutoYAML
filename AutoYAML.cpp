@@ -163,7 +163,9 @@ private:
   template<typename T>
   void emitConvert(T const *Node)
   {
-    OS_ << "template<> struct convert<" << Node->getName() << "> {" << OS_.EndB;
+    auto NodeType { getTypeAsString(Node->getTypeForDecl()) };
+
+    OS_ << "template<> struct convert<" << NodeType << "> {" << OS_.EndB;
 
     OS_.incIndLvl();
 
@@ -179,7 +181,9 @@ private:
   template<typename T>
   void emitEncode(T const *Node)
   {
-    OS_ << "static Node encode(const " << Node->getName() << " &obj) {" << OS_.EndL;
+    auto NodeType { getTypeAsString(Node->getTypeForDecl()) };
+
+    OS_ << "static Node encode(const " << NodeType << " &obj) {" << OS_.EndL;
 
     OS_.incIndLvl();
 
@@ -221,7 +225,9 @@ private:
   template<typename T>
   void emitDecode(T const *Node)
   {
-    OS_ << "static bool decode(Node const &node, " << Node->getName() << " &obj) {" << OS_.EndL;
+    auto NodeType { getTypeAsString(Node->getTypeForDecl()) };
+
+    OS_ << "static bool decode(Node const &node, " << NodeType << " &obj) {" << OS_.EndL;
 
     OS_.incIndLvl();
 
@@ -280,18 +286,32 @@ private:
 
   std::string getTypeAsString(clang::Type const *Type) const
   {
-    clang::QualType QT;
+    clang::PrintingPolicy PP { Context_.getLangOpts() };
+
+    std::string Str;
 
     auto ElaboratedType { llvm::dyn_cast<clang::ElaboratedType>(Type) };
 
-    if (ElaboratedType)
-      QT = ElaboratedType->desugar();
-    else
-      QT = clang::QualType(Type, 0);
+    if (ElaboratedType) {
+      auto QT { ElaboratedType->getNamedType() };
+      Str = QT.getAsString(PP);
 
-    clang::PrintingPolicy PP { Context_.getLangOpts() };
+      // Possibly prepend missing scope qualifiers.
+      auto Qualifier { ElaboratedType->getQualifier() };
 
-    return QT.getAsString(PP);
+      std::string QualifierStr;
+      llvm::raw_string_ostream OS { QualifierStr };
+      Qualifier->print(OS, PP);
+
+      if (Str.rfind(QualifierStr, 0) != 0)
+        Str = QualifierStr + Str;
+
+    } else {
+      auto QT { clang::QualType(Type, 0) };
+      Str = QT.getAsString(PP);
+    }
+
+    return Str;
   }
 
   AutoYAMLOS &OS_;
