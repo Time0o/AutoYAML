@@ -21,6 +21,13 @@ option(AUTO_YAML_BUILD_TEST "Build AutoYAML test" ON)
 
 # dependencies
 
+# Catch2
+add_subdirectory(Catch2)
+
+list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/Catch2/contrib)
+
+include(Catch)
+
 # Clang
 list(APPEND CMAKE_MODULE_PATH ${CMAKE_CURRENT_SOURCE_DIR}/ClangSetup)
 
@@ -36,11 +43,6 @@ target_compile_definitions(${AutoYAML_bin} PRIVATE -DCLANG_INCLUDE_PATHS="${CLAN
 target_link_libraries(${AutoYAML_bin} PRIVATE clang-cpp)
 llvm_config(${AutoYAML_bin} USE_SHARED option)
 
-# install
-if (AUTO_YAML_INSTALL)
-  install(TARGETS ${AutoYAML_bin} DESTINATION bin)
-endif()
-
 # example
 if (AUTO_YAML_BUILD_EXAMPLE)
   add_custom_command(
@@ -55,7 +57,6 @@ if (AUTO_YAML_BUILD_EXAMPLE)
   add_library(AutoYAML_example INTERFACE)
   target_sources(AutoYAML_example PRIVATE "${AutoYAML_example_out}")
   target_include_directories(AutoYAML_example INTERFACE "${AutoYAML_example_out_dir}")
-  target_link_libraries(AutoYAML_example INTERFACE yaml-cpp::yaml-cpp)
 endif()
 
 # test
@@ -65,5 +66,12 @@ if (AUTO_YAML_BUILD_TEST AND BUILD_TESTING)
   endif()
 
   add_executable(AutoYAML_test "${AutoYAML_test_src}")
-  target_link_libraries(AutoYAML_test PRIVATE AutoYAML_example)
+  target_link_libraries(AutoYAML_test PRIVATE AutoYAML_example yaml-cpp::yaml-cpp Catch2::Catch2)
+
+  catch_discover_tests(AutoYAML_test)
+endif()
+
+# install
+if (AUTO_YAML_INSTALL)
+  install(TARGETS ${AutoYAML_bin} DESTINATION bin)
 endif()
