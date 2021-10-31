@@ -2,10 +2,12 @@
 #include <memory>
 #include <sstream>
 #include <string>
+#include <utility>
 
 #include "clang/AST/ASTConsumer.h"
 #include "clang/AST/ASTContext.h"
 #include "clang/AST/Attr.h"
+#include "clang/AST/PrettyPrinter.h"
 #include "clang/ASTMatchers/ASTMatchFinder.h"
 #include "clang/ASTMatchers/ASTMatchers.h"
 #include "clang/Basic/LangOptions.h"
@@ -120,8 +122,9 @@ AutoYAMLOS &operator<<(AutoYAMLOS &OS, AutoYAMLOS::EndBlock const &)
 class AutoYAMLMatchCallback : public clang::ast_matchers::MatchFinder::MatchCallback
 {
 public:
-  AutoYAMLMatchCallback(AutoYAMLOS &OS)
-  : OS_(OS)
+  AutoYAMLMatchCallback(AutoYAMLOS &OS, clang::ASTContext &Context)
+  : OS_(OS),
+    Context_(Context)
   {}
 
   void run(clang::ast_matchers::MatchFinder::MatchResult const &Result) override
@@ -144,7 +147,7 @@ public:
   }
 
 private:
-  void emitConvert(const clang::RecordDecl *Record)
+  void emitConvert(clang::RecordDecl const *Record)
   {
     auto RecordName { Record->getName() };
 
@@ -161,7 +164,7 @@ private:
     OS_ << "};" << OS_.EndB;
   }
 
-  void emitEncode(const clang::RecordDecl *Record)
+  void emitEncode(clang::RecordDecl const *Record)
   {
     auto RecordName { Record->getName() };
 
@@ -171,13 +174,8 @@ private:
 
     OS_ << "Node node;" << OS_.EndL;
 
-    for (auto Field : Record->fields()) {
-      // Skip non-public members.
-      if (Field->getAccess() != clang::AS_public)
-        continue;
-
-      OS_ << "node.push_back(obj." << Field->getNameAsString() << ");" << OS_.EndL;
-    }
+    for (auto [_, FieldName] : getPublicFields(Record))
+      OS_ << "node.push_back(obj." << FieldName << ");" << OS_.EndL;
 
     OS_ << "return node;" << OS_.EndL;
 
@@ -186,7 +184,7 @@ private:
     OS_ << "}" << OS_.EndB;
   }
 
-  void emitDecode(const clang::RecordDecl *Record)
+  void emitDecode(clang::RecordDecl const *Record)
   {
     auto RecordName { Record->getName() };
 
@@ -194,14 +192,55 @@ private:
 
     OS_.incIndLvl();
 
-    OS_ << "return false;" << OS_.EndL;
+    for (auto [FieldType_, FieldName] : getPublicFields(Record)) {
+      auto FieldType { getTypeAsString(FieldType_.getTypePtr()) };
+
+      OS_ << "obj." << FieldName << " = "
+          << "node[\"" << FieldName << "\"]" << ".as<" << FieldType << ">();" << OS_.EndL;
+    }
+
+    OS_ << "return true;" << OS_.EndL;
 
     OS_.decIndLvl();
 
     OS_ << "}" << OS_.EndB;
   }
 
+  using Field = std::pair<clang::QualType, std::string>;
+
+  static std::vector<Field> getPublicFields(clang::RecordDecl const *Record)
+  {
+    std::vector<Field> FieldNames;
+
+    for (auto Field : Record->fields()) {
+      // Skip non-public members.
+      if (Field->getAccess() != clang::AS_public)
+        continue;
+
+      FieldNames.emplace_back(Field->getType(), Field->getNameAsString());
+    }
+
+    return FieldNames;
+  }
+
+  std::string getTypeAsString(clang::Type const *Type) const
+  {
+    clang::QualType QT;
+
+    auto ElaboratedType { llvm::dyn_cast<clang::ElaboratedType>(Type) };
+
+    if (ElaboratedType)
+      QT = ElaboratedType->desugar();
+    else
+      QT = clang::QualType(Type, 0);
+
+    clang::PrintingPolicy PP { Context_.getLangOpts() };
+
+    return QT.getAsString(PP);
+  }
+
   AutoYAMLOS &OS_;
+  clang::ASTContext &Context_;
 };
 
 class AutoYAMLASTConsumer : public clang::ASTConsumer
@@ -218,7 +257,7 @@ public:
     // Create AST Matcher.
     auto AutoYAMLMatchExpression { recordDecl(hasAttr(clang::attr::Annotate)) };
 
-    AutoYAMLMatchCallback MatchCallback { OS_ };
+    AutoYAMLMatchCallback MatchCallback { OS_, Context };
 
     clang::ast_matchers::MatchFinder MatchFinder;
     MatchFinder.addMatcher(AutoYAMLMatchExpression.bind("AutoYAML"), &MatchCallback);
