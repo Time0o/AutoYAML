@@ -201,7 +201,7 @@ private:
   void emitEncode_(clang::RecordDecl const *Record)
   {
     for (auto [_, FieldName] : getPublicFields(Record))
-      OS_ << "node.push_back(obj." << FieldName << ");" << OS_.EndL;
+      OS_ << "node[\"" << FieldName << "\"] = obj." << FieldName << ";" << OS_.EndL;
   }
 
   void emitEncode_(clang::EnumDecl const *Enum)
