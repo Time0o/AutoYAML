@@ -35,6 +35,9 @@ static llvm::cl::opt<std::string> OutDir { "out-dir",
                                            llvm::cl::desc("Output directory"),
                                            llvm::cl::cat(AutoYAMLToolCategory) };
 
+static char const *AUTO_YAML_MATCHER_ID = "AutoYAML";
+static char const *AUTO_YAML_ANNOTATION = "AutoYAML";
+
 // Convenience wrapper around llvm::raw_fd_ostream that handles indentation levels nicely.
 class AutoYAMLOS
 {
@@ -129,53 +132,60 @@ public:
 
   void run(clang::ast_matchers::MatchFinder::MatchResult const &Result) override
   {
-    // Get record declaration node.
-    auto Record { Result.Nodes.getNodeAs<clang::RecordDecl>("AutoYAML") };
-    assert(Record);
-    assert(Record->hasAttrs());
-
-    // Check if it's annotated with __attribute__((annotate("AutoYAML"))).
-    auto Attr { Record->getAttrs()[0] };
-    auto AnnotateAttr { llvm::dyn_cast<clang::AnnotateAttr>(Attr) };
-    assert(AnnotateAttr);
-
-    if (AnnotateAttr->getAnnotation() != "AutoYAML")
-      return;
-
-    // Emit conversion code.
-    emitConvert(Record);
+    run<clang::RecordDecl>(Result, &AutoYAMLMatchCallback::emitConvert) ||
+    run<clang::EnumDecl>(Result,  &AutoYAMLMatchCallback::emitConvert);
   }
 
 private:
-  void emitConvert(clang::RecordDecl const *Record)
+  template<typename T>
+  bool run(clang::ast_matchers::MatchFinder::MatchResult const &Result,
+           void(AutoYAMLMatchCallback::*Action)(T const *))
   {
-    auto RecordName { Record->getName() };
+    auto Node { Result.Nodes.getNodeAs<T>(AUTO_YAML_MATCHER_ID) };
+    if (!Node)
+      return false;
 
-    OS_ << "template<> struct convert<" << RecordName << "> {" << OS_.EndL;
+    assert(Node->hasAttrs());
+
+    auto Attr { Node->getAttrs()[0] };
+
+    auto AnnotateAttr { llvm::dyn_cast<clang::AnnotateAttr>(Attr) };
+    assert(AnnotateAttr);
+
+    if (AnnotateAttr->getAnnotation() != AUTO_YAML_ANNOTATION)
+      return false;
+
+    (this->*Action)(Node);
+
+    return true;
+  }
+
+  template<typename T>
+  void emitConvert(T const *Node)
+  {
+    OS_ << "template<> struct convert<" << Node->getName() << "> {" << OS_.EndB;
 
     OS_.incIndLvl();
 
-    emitEncode(Record);
+    emitEncode(Node);
 
-    emitDecode(Record);
+    emitDecode(Node);
 
     OS_.decIndLvl();
 
     OS_ << "};" << OS_.EndB;
   }
 
-  void emitEncode(clang::RecordDecl const *Record)
+  template<typename T>
+  void emitEncode(T const *Node)
   {
-    auto RecordName { Record->getName() };
-
-    OS_ << "static Node encode(const " << RecordName << " &obj) {" << OS_.EndL;
+    OS_ << "static Node encode(const " << Node->getName() << " &obj) {" << OS_.EndL;
 
     OS_.incIndLvl();
 
     OS_ << "Node node;" << OS_.EndL;
 
-    for (auto [_, FieldName] : getPublicFields(Record))
-      OS_ << "node.push_back(obj." << FieldName << ");" << OS_.EndL;
+    emitEncode_(Node);
 
     OS_ << "return node;" << OS_.EndL;
 
@@ -184,13 +194,49 @@ private:
     OS_ << "}" << OS_.EndB;
   }
 
-  void emitDecode(clang::RecordDecl const *Record)
+  void emitEncode_(clang::RecordDecl const *Record)
   {
-    auto RecordName { Record->getName() };
+    for (auto [_, FieldName] : getPublicFields(Record))
+      OS_ << "node.push_back(obj." << FieldName << ");" << OS_.EndL;
+  }
 
-    OS_ << "static bool decode(Node const &node, " << RecordName << " &obj) {" << OS_.EndL;
+  void emitEncode_(clang::EnumDecl const *Enum)
+  {
+    OS_ << "switch (obj) {" << OS_.EndL;
+
+    for (auto Constant : Enum->enumerators()) {
+      OS_ << "case " << Constant->getQualifiedNameAsString() << ":" << OS_.EndL;
+
+      OS_.incIndLvl();
+
+      OS_ << "node = \"" << Constant->getNameAsString() << "\";" << OS_.EndL;
+      OS_ << "break;" << OS_.EndL;
+
+      OS_.decIndLvl();
+    }
+
+    OS_ << "}" << OS_.EndL;
+  }
+
+  template<typename T>
+  void emitDecode(T const *Node)
+  {
+    OS_ << "static bool decode(Node const &node, " << Node->getName() << " &obj) {" << OS_.EndL;
 
     OS_.incIndLvl();
+
+    emitDecode_(Node);
+
+    OS_ << "return true;" << OS_.EndL;
+
+    OS_.decIndLvl();
+
+    OS_ << "}" << OS_.EndB;
+  }
+
+  void emitDecode_(clang::RecordDecl const *Record)
+  {
+    // XXX check if all fields are valid
 
     for (auto [FieldType_, FieldName] : getPublicFields(Record)) {
       auto FieldType { getTypeAsString(FieldType_.getTypePtr()) };
@@ -198,12 +244,21 @@ private:
       OS_ << "obj." << FieldName << " = "
           << "node[\"" << FieldName << "\"]" << ".as<" << FieldType << ">();" << OS_.EndL;
     }
+  }
 
-    OS_ << "return true;" << OS_.EndL;
+  void emitDecode_(clang::EnumDecl const *Enum)
+  {
+    OS_ << "auto str { node.as<std::string>() };" << OS_.EndL;
 
-    OS_.decIndLvl();
+    for (auto Constant : Enum->enumerators()) {
+      if (Constant != *Enum->enumerator_begin())
+        OS_ << "else ";
 
-    OS_ << "}" << OS_.EndB;
+      OS_ << "if (str == \"" << Constant->getNameAsString() << "\") "
+          << "obj = " << Constant->getQualifiedNameAsString() << ";" << OS_.EndL;
+    }
+
+    OS_ << "else return false;" << OS_.EndL;
   }
 
   using Field = std::pair<clang::QualType, std::string>;
@@ -255,12 +310,12 @@ public:
     using namespace clang::ast_matchers;
 
     // Create AST Matcher.
-    auto AutoYAMLMatchExpression { recordDecl(hasAttr(clang::attr::Annotate)) };
+    auto AutoYAMLMatchExpression { tagDecl(hasAttr(clang::attr::Annotate)) };
 
     AutoYAMLMatchCallback MatchCallback { OS_, Context };
 
     clang::ast_matchers::MatchFinder MatchFinder;
-    MatchFinder.addMatcher(AutoYAMLMatchExpression.bind("AutoYAML"), &MatchCallback);
+    MatchFinder.addMatcher(AutoYAMLMatchExpression.bind(AUTO_YAML_MATCHER_ID), &MatchCallback);
 
     // Emit conversion code.
     emitPreamble();
