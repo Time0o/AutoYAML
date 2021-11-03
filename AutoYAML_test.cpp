@@ -6,7 +6,7 @@
 
 namespace {
 
-static std::string const AutoYAML_example_YAML {
+static std::string AutoYAML_example_no_default_YAML {
 
 R"(
 s: some string
@@ -27,8 +27,16 @@ m:
   3: 4
   5: 6
 n:
-  i: 42
-)"
+  i: 42)"
+
+};
+
+static std::string AutoYAML_example_default_YAML {
+
+AutoYAML_example_no_default_YAML +
+
+R"(
+i_default: 123)"
 
 };
 
@@ -36,7 +44,7 @@ n:
 
 TEST_CASE("YAML files are correctly decoded", "[decode]")
 {
-  auto node { YAML::Load(AutoYAML_example_YAML) };
+  auto node { YAML::Load(AutoYAML_example_no_default_YAML.substr(1)) };
 
   auto example { node.as<AutoYAML_example>() };
 
@@ -49,6 +57,7 @@ TEST_CASE("YAML files are correctly decoded", "[decode]")
   CHECK(example.l == std::list<int>{4, 5, 6});
   CHECK(example.m == std::map<int, int>{{1, 2}, {3, 4}, {5, 6}});
   CHECK(example.n.i == 42);
+  CHECK(example.i_default == 123);
 }
 
 TEST_CASE("C++ objects are correctly encoded", "[encode]")
@@ -69,5 +78,5 @@ TEST_CASE("C++ objects are correctly encoded", "[encode]")
   YAML::Emitter out;
   out << node;
 
-  CHECK(out.c_str() == AutoYAML_example_YAML.substr(1, AutoYAML_example_YAML.size() - 2));
+  CHECK(out.c_str() == AutoYAML_example_default_YAML.substr(1));
 }

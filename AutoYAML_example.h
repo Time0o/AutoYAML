@@ -39,4 +39,7 @@ AutoYAML(struct) AutoYAML_example
   };
 
   Nested n;
+
+  // default values
+  int i_default = 123;
 };
