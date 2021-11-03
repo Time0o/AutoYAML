@@ -200,11 +200,8 @@ private:
 
   void emitEncode_(clang::RecordDecl const *Record)
   {
-    for (auto Field : getPublicFields(Record)) {
-      auto FieldName { Field->getNameAsString() };
-
-      OS_ << "node[\"" << FieldName << "\"] = obj." << FieldName << ";" << OS_.EndL;
-    }
+    for (auto Field : getPublicFields(Record))
+      OS_ << "node[\"" << Field.Name << "\"] = obj." << Field.Name << ";" << OS_.EndL;
   }
 
   void emitEncode_(clang::EnumDecl const *Enum)
@@ -245,17 +242,26 @@ private:
 
   void emitDecode_(clang::RecordDecl const *Record)
   {
-    // XXX check if all fields are valid
+    std::vector<std::string> FieldNames;
+
+    // Sanity checks.
+    OS_ << "check_node(node);" << OS_.EndL;
+
+    OS_ << "check_node_properties(node, {" << OS_.EndL;
 
     for (auto Field : getPublicFields(Record)) {
-      auto FieldName { Field->getNameAsString() };
-      auto FieldType { getTypeAsString(Field->getType()) };
+      if (!Field.HasDefaultValue)
+        OS_ << "  \"" << Field.Name << "\"," << OS_.EndL;
+    }
 
-      bool HasDefaultValue { Field->getInClassInitStyle() == clang::ICIS_CopyInit };
-      char const *set = HasDefaultValue ? "set_optional_value" : "set_value";
+    OS_ << "});" << OS_.EndL;
 
-      OS_ << set << "<" << FieldType << ">"
-          << "(obj." << FieldName << ", node, \"" << FieldName << "\");" << OS_.EndL;
+    // Set fields.
+    for (auto Field : getPublicFields(Record)) {
+      char const *set = Field.HasDefaultValue ? "set_optional_field" : "set_field";
+
+      OS_ << set << "<" << Field.Type << ">"
+          << "(obj." << Field.Name << ", node, \"" << Field.Name << "\");" << OS_.EndL;
     }
   }
 
@@ -274,16 +280,27 @@ private:
     OS_ << "else return false;" << OS_.EndL;
   }
 
-  static std::vector<clang::FieldDecl *> getPublicFields(clang::RecordDecl const *Record)
+  struct RecordField
   {
-    std::vector<clang::FieldDecl *> Fields;
+    std::string Name;
+    std::string Type;
+    bool HasDefaultValue;
+  };
 
-    for (auto Field : Record->fields()) {
+  std::vector<RecordField> getPublicFields(clang::RecordDecl const *Record) const
+  {
+    std::vector<RecordField> Fields;
+
+    for (auto FieldDecl : Record->fields()) {
       // Skip non-public members.
-      if (Field->getAccess() != clang::AS_public)
+      if (FieldDecl->getAccess() != clang::AS_public)
         continue;
 
-      Fields.emplace_back(Field);
+      RecordField Field { FieldDecl->getNameAsString(),
+                          getTypeAsString(FieldDecl->getType()),
+                          FieldDecl->getInClassInitStyle() == clang::ICIS_CopyInit };
+
+      Fields.emplace_back(std::move(Field));
     }
 
     return Fields;
