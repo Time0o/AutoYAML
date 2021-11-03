@@ -94,16 +94,12 @@ repository:
 
 ```
 mkdir build && cd build
-cmake .. -DCMAKE_CXX_COMPILER=clang++ -DClang_DIR=/usr/lib/clang/12.0.0/ -DClang_VERSION=12
+cmake .. -DCMAKE_CXX_COMPILER=clang++
 cmake --build .
 ```
 
 This will create the `AutoYAML` executable at the root of the build directory.
-You can install it to `${CMAKE_INSTALL_PREFIX}/bin` by running `cmake --install
-.`. Note that you need to build with clang and that the `Clang_DIR` and
-`Clang_VERSION` parameters are mandatory. The correct `Clang_DIR` location
-might be different on your system and you can also try building against another
-version of Clang/LLVM (at your own risk).
+You can install it to `${CMAKE_INSTALL_PREFIX}/bin` by running `cmake --install.
 
 ## TODO
 

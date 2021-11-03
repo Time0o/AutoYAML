@@ -27,7 +27,7 @@ include(ClangSetup)
 # build
 add_executable(${AutoYAML_bin} "${AutoYAML_src}")
 target_compile_features(${AutoYAML_bin} PRIVATE cxx_std_17)
-target_compile_definitions(${AutoYAML_bin} PRIVATE -DCLANG_INCLUDE_PATHS="${CLANG_INCLUDE_PATHS}")
+target_compile_definitions(${AutoYAML_bin} PRIVATE -DCLANG_INCLUDE_PATHS="${Clang_INCLUDE_PATHS}")
 target_link_libraries(${AutoYAML_bin} PRIVATE clang-cpp)
 llvm_config(${AutoYAML_bin} USE_SHARED option)
 
