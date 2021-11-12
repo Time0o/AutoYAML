@@ -4,6 +4,8 @@
 #include "AutoYAML_example.h"
 #include "AutoYAML_example.AutoYAML.h"
 
+using namespace std::literals::chrono_literals;
+
 namespace {
 
 static std::string AutoYAML_example_no_default_YAML {
@@ -27,7 +29,8 @@ m:
   3: 4
   5: 6
 n:
-  i: 42)"
+  i: 42
+sec: 10)"
 
 };
 
@@ -36,11 +39,28 @@ static std::string AutoYAML_example_default_YAML {
 AutoYAML_example_no_default_YAML +
 
 R"(
-i_default: 123)"
+def: 123)"
 
 };
 
 }
+
+namespace YAML {
+
+template<typename Rep, typename Period>
+struct convert<std::chrono::duration<Rep, Period>>
+{
+  static Node encode(const std::chrono::duration<Rep, Period> &obj) {
+    return Node(obj.count());
+  }
+
+  static bool decode(Node const &node, std::chrono::duration<Rep, Period> &obj) {
+    obj = std::chrono::duration<Rep, Period> { node.as<std::size_t>() };
+    return true;
+  }
+};
+
+} // end namespace YAML
 
 TEST_CASE("YAML files are correctly decoded", "[decode]")
 {
@@ -57,7 +77,8 @@ TEST_CASE("YAML files are correctly decoded", "[decode]")
   CHECK(example.l == std::list<int>{4, 5, 6});
   CHECK(example.m == std::map<int, int>{{1, 2}, {3, 4}, {5, 6}});
   CHECK(example.n.i == 42);
-  CHECK(example.i_default == 123);
+  CHECK(example.sec == 10s);
+  CHECK(example.def == 123);
 }
 
 TEST_CASE("C++ objects are correctly encoded", "[encode]")
@@ -72,6 +93,7 @@ TEST_CASE("C++ objects are correctly encoded", "[encode]")
   example.l = std::list<int>{4, 5, 6};
   example.m = std::map<int, int>{{1, 2}, {3, 4}, {5, 6}};
   example.n.i = 42;
+  example.sec = 10s;
 
   YAML::Node node { example };
 

@@ -1,5 +1,6 @@
 #pragma once
 
+#include <chrono>
 #include <list>
 #include <map>
 #include <string>
@@ -40,6 +41,9 @@ AutoYAML(struct) AutoYAML_example
 
   Nested n;
 
+  // arbitrary types
+  std::chrono::seconds sec;
+
   // default values
-  int i_default = 123;
+  int def = 123;
 };
