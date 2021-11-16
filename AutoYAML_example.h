@@ -8,6 +8,8 @@
 
 #include "AutoYAML.h"
 
+namespace example {
+
 AutoYAML(struct) AutoYAML_example
 {
   // strings
@@ -47,3 +49,5 @@ AutoYAML(struct) AutoYAML_example
   // default values
   int def = 123;
 };
+
+} // end namespace example

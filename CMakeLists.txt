@@ -47,6 +47,7 @@ if (AUTO_YAML_BUILD_EXAMPLE)
     COMMAND $<TARGET_FILE:${AutoYAML_bin}>
             --extra-arg -I"${YAML_CPP_INCLUDE_DIR}"
             --extra-arg -I"${YAML_CPP_EXPORT_INCLUDE_DIR}"
+            --gen-comp-ops
             --out-dir "${AutoYAML_example_out_dir}"
             "${AutoYAML_example_in}"
             --

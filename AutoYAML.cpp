@@ -1,7 +1,10 @@
+#include <cstdint>
 #include <cstdlib>
 #include <memory>
+#include <optional>
 #include <sstream>
 #include <string>
+#include <unordered_set>
 #include <utility>
 
 #include "clang/AST/ASTConsumer.h"
@@ -27,16 +30,23 @@
 #include "llvm/Support/FileSystem.h"
 #include "llvm/Support/raw_ostream.h"
 
+static char const *AUTO_YAML_MATCHER_ID = "AutoYAML";
+static char const *AUTO_YAML_ANNOTATION = "AutoYAML";
+
+// Command line options.
 static llvm::cl::OptionCategory AutoYAMLToolCategory { "autoyaml options" };
 
 static llvm::cl::extrahelp CommonHelp { clang::tooling::CommonOptionsParser::HelpMessage };
 
-static llvm::cl::opt<std::string> OutDir { "out-dir",
-                                           llvm::cl::desc("Output directory"),
-                                           llvm::cl::cat(AutoYAMLToolCategory) };
+static llvm::cl::opt<bool> GenCompOps {
+  "gen-comp-ops",
+  llvm::cl::desc("Generate comparison operators"),
+  llvm::cl::cat(AutoYAMLToolCategory) };
 
-static char const *AUTO_YAML_MATCHER_ID = "AutoYAML";
-static char const *AUTO_YAML_ANNOTATION = "AutoYAML";
+static llvm::cl::opt<std::string> OutDir {
+  "out-dir",
+  llvm::cl::desc("Output directory"),
+  llvm::cl::cat(AutoYAMLToolCategory) };
 
 // Convenience wrapper around llvm::raw_fd_ostream that handles indentation levels nicely.
 class AutoYAMLOS
@@ -125,26 +135,55 @@ AutoYAMLOS &operator<<(AutoYAMLOS &OS, AutoYAMLOS::EndBlock const &)
 class AutoYAMLMatchCallback : public clang::ast_matchers::MatchFinder::MatchCallback
 {
 public:
-  AutoYAMLMatchCallback(AutoYAMLOS &OS, clang::ASTContext &Context)
+  AutoYAMLMatchCallback(AutoYAMLOS &OS,
+                        clang::ASTContext &ASTContext,
+                        clang::ast_matchers::MatchFinder &MatchFinder)
   : OS_(OS),
-    Context_(Context)
+    ASTContext_(ASTContext),
+    MatchFinder_(MatchFinder)
   {}
 
   void run(clang::ast_matchers::MatchFinder::MatchResult const &Result) override
   {
-    run<clang::RecordDecl>(Result, &AutoYAMLMatchCallback::emitConvert) ||
-    run<clang::EnumDecl>(Result,  &AutoYAMLMatchCallback::emitConvert);
+    // Check whether we've already matched this node.
+    auto Decl { getNode<clang::Decl>(Result) };
+
+    if (!MatchedNodes_.insert(Decl->getID()).second)
+      return;
+
+    // If node is a record declaration...
+    auto Record { getNode<clang::RecordDecl>(Result) };
+
+    if (Record) {
+      // Match nested declarations first.
+      auto RecordContext { static_cast<clang::DeclContext const *>(Record) };
+
+      for (auto const *InnerDecl : RecordContext->decls())
+        MatchFinder_.match(*InnerDecl, ASTContext_);
+
+      // Generate a `YAML::convert` specialization.
+      run(Record, &AutoYAMLMatchCallback::emitConvert);
+
+      // Optionally generator an `operator==` definition.
+      if (GenCompOps)
+        run(Record, &AutoYAMLMatchCallback::emitCompare);
+
+      return;
+    }
+
+    // If node is an enum declaration...
+    auto Enum { getNode<clang::EnumDecl>(Result) };
+
+    if (Enum)
+      // Generate a `YAML::convert` specialization.
+      run(Enum, &AutoYAMLMatchCallback::emitConvert);
   }
 
 private:
   template<typename T>
-  bool run(clang::ast_matchers::MatchFinder::MatchResult const &Result,
-           void(AutoYAMLMatchCallback::*Action)(T const *))
+  void run(T const *Node, void(AutoYAMLMatchCallback::*Action)(T const *))
   {
-    auto Node { Result.Nodes.getNodeAs<T>(AUTO_YAML_MATCHER_ID) };
-    if (!Node)
-      return false;
-
+    assert(Node);
     assert(Node->hasAttrs());
 
     auto Attr { Node->getAttrs()[0] };
@@ -153,17 +192,17 @@ private:
     assert(AnnotateAttr);
 
     if (AnnotateAttr->getAnnotation() != AUTO_YAML_ANNOTATION)
-      return false;
+      return;
 
     (this->*Action)(Node);
-
-    return true;
   }
 
   template<typename T>
   void emitConvert(T const *Node)
   {
     auto NodeType { getTypeAsString(Node->getTypeForDecl()) };
+
+    OS_ << "namespace YAML {" << OS_.EndB;
 
     OS_ << "template<> struct convert<" << NodeType << "> {" << OS_.EndB;
 
@@ -176,6 +215,8 @@ private:
     OS_.decIndLvl();
 
     OS_ << "};" << OS_.EndB;
+
+    OS_ << "} // end namespace YAML" << OS_.EndB;
   }
 
   template<typename T>
@@ -183,7 +224,7 @@ private:
   {
     auto NodeType { getTypeAsString(Node->getTypeForDecl()) };
 
-    OS_ << "static Node encode(const " << NodeType << " &obj) {" << OS_.EndL;
+    OS_ << "static Node encode(" << NodeType << " const &obj) {" << OS_.EndL;
 
     OS_.incIndLvl();
 
@@ -280,12 +321,61 @@ private:
     OS_ << "else return false;" << OS_.EndL;
   }
 
+  // Emit an implementation of operator== for a given record type. This is
+  // useful when C++20's operator==(...) = default is not available.
+  void emitCompare(clang::RecordDecl const *Record)
+  {
+    auto RecordType { getTypeAsString(Record->getTypeForDecl()) };
+    auto RecordNamespace { getNamespace(Record) };
+
+    // Strip namespace prexi from type.
+    if (RecordNamespace && RecordType.rfind(*RecordNamespace, 0) == 0)
+      RecordType = RecordType.substr(RecordNamespace->size() + 2);
+
+    if (RecordNamespace)
+      OS_ << "namespace " << *RecordNamespace << " {" << OS_.EndB;
+
+    OS_ << "bool operator==("
+        << RecordType << " const &obj, "
+        << RecordType << " const &other) {" << OS_.EndL;
+
+    OS_.incIndLvl();
+
+    // XXX Check if fields are actually comparable.
+    auto Fields { getPublicFields(Record) };
+
+    if (!Fields.empty()) {
+      for (std::size_t i = 0; i < Fields.size(); ++i) {
+        auto const &Field { Fields[i] };
+
+        OS_ << (i == 0 ? "return" : "      ");
+
+        OS_ << " obj." << Field.Name << " == other." << Field.Name;
+
+        OS_ << (i == Fields.size() - 1 ? ";" : " &&") << OS_.EndL;
+      }
+    }
+
+    OS_.decIndLvl();
+
+    OS_ << "}" << OS_.EndB;
+
+    if (RecordNamespace)
+      OS_ << "} // end namespace " << *RecordNamespace << OS_.EndB;
+  }
+
   struct RecordField
   {
     std::string Name;
     std::string Type;
     bool HasDefaultValue;
   };
+
+  template<typename T>
+  static T const *getNode(clang::ast_matchers::MatchFinder::MatchResult const &Result)
+  {
+    return Result.Nodes.getNodeAs<T>(AUTO_YAML_MATCHER_ID);
+  }
 
   std::vector<RecordField> getPublicFields(clang::RecordDecl const *Record) const
   {
@@ -306,6 +396,26 @@ private:
     return Fields;
   }
 
+  std::optional<std::string> getNamespace(clang::RecordDecl const *Record) const
+  {
+    auto const *Context { Record->getDeclContext() };
+
+    while (!Context->isTranslationUnit()) {
+      if (Context->isNamespace()) {
+        auto NamespaceDecl(llvm::dyn_cast<clang::NamespaceDecl>(Context));
+
+        if (NamespaceDecl->isAnonymousNamespace())
+          return std::nullopt;
+
+        return NamespaceDecl->getNameAsString();
+      }
+
+      Context = Context->getParent();
+    }
+
+    return std::nullopt;
+  }
+
   std::string getTypeAsString(clang::QualType const &Type) const
   {
     return getTypeAsString(Type.getTypePtr());
@@ -313,7 +423,7 @@ private:
 
   std::string getTypeAsString(clang::Type const *Type) const
   {
-    clang::PrintingPolicy PP { Context_.getLangOpts() };
+    clang::PrintingPolicy PP { ASTContext_.getLangOpts() };
 
     std::string Str;
 
@@ -342,7 +452,9 @@ private:
   }
 
   AutoYAMLOS &OS_;
-  clang::ASTContext &Context_;
+  clang::ASTContext &ASTContext_;
+  clang::ast_matchers::MatchFinder &MatchFinder_;
+  std::unordered_set<std::int64_t> MatchedNodes_;
 };
 
 class AutoYAMLASTConsumer : public clang::ASTConsumer
@@ -359,21 +471,16 @@ public:
     // Create AST Matcher.
     auto AutoYAMLMatchExpression { tagDecl(hasAttr(clang::attr::Annotate)) };
 
-    AutoYAMLMatchCallback MatchCallback { OS_, Context };
-
     clang::ast_matchers::MatchFinder MatchFinder;
+
+    AutoYAMLMatchCallback MatchCallback { OS_, Context, MatchFinder };
+
     MatchFinder.addMatcher(AutoYAMLMatchExpression.bind(AUTO_YAML_MATCHER_ID), &MatchCallback);
 
     // Emit conversion code.
     emitPreamble();
 
-    OS_.incIndLvl();
-
     MatchFinder.matchAST(Context);
-
-    OS_.decIndLvl();
-
-    emitEpilogue();
   }
 
 private:
@@ -382,13 +489,6 @@ private:
     OS_ << "// Automatically generated by AutoYAML, do not modify!" << OS_.EndB;
 
     OS_ << "#pragma once" << OS_.EndB;
-
-    OS_ << "namespace YAML {" << OS_.EndB;
-  }
-
-  void emitEpilogue()
-  {
-    OS_ << "} // end namespace YAML";
   }
 
   AutoYAMLOS &OS_;
